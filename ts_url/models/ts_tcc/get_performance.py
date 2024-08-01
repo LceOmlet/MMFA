@@ -12,8 +12,8 @@ for data in datasets.split(" "):
     train_data, train_labels, test_data, test_labels = load_UEA(data)
     os.makedirs(os.path.join("data", data))
     with open(os.path.join("data", data, "train.pt"), "wb") as train, open(os.path.join("data", data, "test.pt"), "wb") as test:
-        train_data = {"samples": torch.tensor(train_data, dtype=torch.float64).permute(0, 2, 1), "labels": torch.tensor(train_labels, dtype=torch.int64)}
-        test_data = {"samples": torch.tensor(test_data, dtype=torch.float64).permute(0, 2, 1), "labels": torch.tensor(test_labels, dtype=torch.int64)}
+        train_data = {"samples": torch.tensor(train_data, dtype=torch.float64), "labels": torch.tensor(train_labels, dtype=torch.int64)}
+        test_data = {"samples": torch.tensor(test_data, dtype=torch.float64), "labels": torch.tensor(test_labels, dtype=torch.int64)}
         torch.save(train_data, train)
         torch.save(test_data, test)
 

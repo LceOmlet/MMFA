@@ -41,6 +41,7 @@ def pretraining_eval_loop_init(model, dataloader, evaluator, device, **kwargs):
         for k in batch:
             batch[k] = batch[k].to(device) if isinstance(batch[k], torch.Tensor) else batch[k]
         evaluator.append_train(model, **batch)
+    
 
 @EVALUATE_STEP.register("imputation")
 def evaluate_imputation(batch, model, device, val_loss_module, evaluator, **kwargs):
@@ -66,26 +67,20 @@ def evaluate_imputation(batch, model, device, val_loss_module, evaluator, **kwar
 
 @EVALUATE_STEP.register("pretraining")
 def evaluate_pretraining(batch, model, device, model_name, val_loss_module, evaluator, **kwargs):
-    X, target, mask, padding_mask, label, ID = tuple(batch.values())
-    target = target.to(device)
+    X, mask, label, ID = tuple(batch.values())
     mask = mask.to(device)  
-    padding_mask = padding_mask.to(device) 
     X = X.to(device)
-    pretrain_evaluate_kwargs = {
-        "target": target,
-        "mask": mask,
-        "val_loss_module": val_loss_module,
-        "model": model,
-        "X": X,
-        "padding_mask": padding_mask,
-        "device": device,
-        "evaluator": evaluator
-    }
+    pretrain_evaluate_kwargs = dict(mask=mask, 
+     val_loss_module=val_loss_module, 
+     model=model, 
+     X=X, 
+     device=device, 
+     evaluator=evaluator)
+
     batch_loss, mean_loss, active_elements = PRETRAIN_EVALUATE_STEP.get(model_name)(**pretrain_evaluate_kwargs)
-    evaluator.append_valid(model, X=X, target=target, ID=ID, mask=mask, label=label)
+    evaluator.append_valid(model, X=X, ID=ID, mask=mask, label=label)
     return batch_loss, mean_loss, active_elements
 
-@PRETRAIN_EVALUATE_STEP.register("mvts_transformer")
 def pretrain_evaluate_mvts_transformer(X, model,  device, target, padding_mask, mask, val_loss_module, evaluator, **kwargs):
     prediction = model(X.to(device), padding_masks=padding_mask) 
     loss = val_loss_module(prediction, target, mask)  # (num_active,) individual loss (square error per element) for each active value in 
@@ -104,11 +99,14 @@ def pretrain_evaluate_mvts_transformer(X, model,  device, target, padding_mask, 
     active_elements = len(loss)
     return batch_loss, mean_loss, active_elements
 
+@PRETRAIN_EVALUATE_STEP.register("mvts_transformer")
 @PRETRAIN_EVALUATE_STEP.register("ts2vec")
 @PRETRAIN_EVALUATE_STEP.register("ts_tcc")
 @PRETRAIN_EVALUATE_STEP.register("t_loss")
 @PRETRAIN_EVALUATE_STEP.register("csl")
-def pretrain_evaluate_ts2vec(X, model, device, padding_mask, **kwargs):
+@PRETRAIN_EVALUATE_STEP.register("mmfa_rec")
+@PRETRAIN_EVALUATE_STEP.register("mmfa")
+def pretrain_evaluate_ts2vec( **kwargs):
     mean_loss = float('inf')
     active_elements = 1
     batch_loss = 0
@@ -181,15 +179,23 @@ def eval_agg_imputation(**kwargs):
 @MAKE_EVAL_REPORT.register("pretraining")
 def eval_agg_ts2vec_ts_tcc_t_loss(evaluator, val_loss_module, logger, epoch_metrics, **kwargs):
     if evaluator is not None:
-        infer_kwargs = {
-            "val_loss_module": val_loss_module
-        }
+        infer_kwargs = dict(
+            val_loss_module=val_loss_module,
+            dset="valid"
+            )
+
         epoch_metrics.update(evaluator.infer(**infer_kwargs))
+        # infer_kwargs["dset"] = "train"
+        # train_epoch_metrics = evaluator.infer(**infer_kwargs)
+        # for tk in train_epoch_metrics:
+        #     epoch_metrics["train_" + tk] = train_epoch_metrics[tk]
     else:
-        epoch_metrics.update({
-            "report": 0,
-            "loss": 0
-        })
+        epoch_metrics.update(
+            dict(
+                report=0, 
+                loss=0
+            )
+        )
     return epoch_metrics
 
 @MAKE_EVAL_REPORT.register("classification")
@@ -231,14 +237,15 @@ def evaluate(model, valid_dataloader, task, device, val_loss_module,
     for i, batch in enumerate(valid_dataloader):
         mask = None
 
-        evaluate_step_kwargs = {
-            "batch": batch,
-            "model": model,
-            "device": device,
-            "model_name": model_name,
-            "val_loss_module": val_loss_module,
-            "evaluator": evaluator
-        }
+        evaluate_step_kwargs = dict(
+            batch=batch, 
+            model=model, 
+            device=device, 
+            model_name=model_name, 
+            val_loss_module=val_loss_module, 
+            evaluator=evaluator
+            )
+
         batch_loss, mean_loss, active_elements = EVALUATE_STEP.get(task)(**evaluate_step_kwargs)
         epoch_loss += batch_loss
         total_active_elements += active_elements
@@ -256,14 +263,15 @@ def evaluate(model, valid_dataloader, task, device, val_loss_module,
     epoch_metrics['epoch'] = epoch_num
     epoch_metrics['loss'] = float(epoch_loss)
 
-    eval_aggr_kwargs = {
-        "epoch_metrics": epoch_metrics,
-        "val_loss_module": val_loss_module,
-        "logger": logger,
-        "evaluator": evaluator,
-        "model_name": model_name,
-        "epoch_loss": epoch_loss
-    } 
+    eval_aggr_kwargs = dict(
+        epoch_metrics=epoch_metrics, 
+        val_loss_module=val_loss_module, 
+        logger=logger, 
+        evaluator=evaluator, 
+        model_name=model_name, 
+        epoch_loss=epoch_loss
+        )
+
 
     make_report = MAKE_EVAL_REPORT.get(task)
  

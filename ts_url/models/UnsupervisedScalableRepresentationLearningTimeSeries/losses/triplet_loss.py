@@ -135,7 +135,7 @@ class TripletLoss(torch.nn.modules.loss._Loss):
                     :, :,
                     beginning_samples_neg[i, j]:
                     beginning_samples_neg[i, j] + length_pos_neg
-                ] for j in range(batch_size)])
+                ] for j in range(batch_size)]).float()
             )
             loss += multiplicative_ratio * -torch.mean(
                 torch.nn.functional.logsigmoid(-torch.bmm(

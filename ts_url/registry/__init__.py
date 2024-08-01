@@ -16,3 +16,5 @@ from .registry import TRAIN_LOOP_INIT
 from .registry import TRAINER_INIT
 from .registry import TEST_METHODS
 from .registry import EVAL_LOOP_INIT
+from .registry import TRANSFORMATION
+from .registry import DATASET

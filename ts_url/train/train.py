@@ -1,4 +1,4 @@
-from ..registry.registry import TRAIN_FN, TRAIN_STEP, PRETRAIN_STEP, EVALUATOR, TRAIN_LOOP_INIT, TRAINER_INIT, TEST_METHODS
+from ..registry.registry import TRAIN_FN, TRAIN_STEP, PRETRAIN_STEP, EVALUATOR, TRAIN_LOOP_INIT, TRAINER_INIT, TEST_METHODS, MODELS
 from collections import OrderedDict
 import torch
 from ..utils.loss import hierarchical_contrastive_loss
@@ -11,9 +11,13 @@ from collections.abc import Collection
 
 def have_None(inp):
     # dict is not allowed here
+    if isinstance(inp, dict):
+        return True
     if inp is None:
         return True
-    elif isinstance(inp, Collection) and not isinstance(inp, torch.Tensor) and not isinstance(inp, np.ndarray):
+    elif isinstance(inp, Collection) \
+        and not isinstance(inp, torch.Tensor) \
+            and not isinstance(inp, np.ndarray):
         return have_None(inp[0])
     else:
         return False
@@ -45,9 +49,9 @@ def fit_imputation(reprs, targets, masks, valid_ratio, loss_module):
     return lr
 
 @TRAIN_FN.register("default")
-def train_epoch(model, dataloader, task, device, loss_module, evaluator,
-                optimizer, model_name, print_interval, print_callback, val_loss_module,
-                logger, optim_config, t_loss_train=None, temporal_contr_optimizer=None, 
+def train_epoch(model, dataloader, task, device, 
+                model_name, print_interval, print_callback, val_loss_module,
+                logger,
                 epoch_num=None, **kwargs):
     epoch_metrics = OrderedDict()
     model.train()
@@ -56,53 +60,52 @@ def train_epoch(model, dataloader, task, device, loss_module, evaluator,
     init_loop = TRAIN_LOOP_INIT.get(model_name)
     kwargs_init = {}
     if init_loop is not None:
-        init_kwargs = {
-            "model": model,
-            "device": device
-        }
+        init_kwargs = dict(model=model, device=device)
         kwargs_init.update(init_loop(**init_kwargs))
 
     train_step = TRAIN_STEP.get(task)
     if train_step is not None:
         for i, batch in enumerate(dataloader):
-            train_step_config = {
-                "batch": batch, 
-                "model": model, 
-                "device": device, 
-                "optimizer": optimizer, 
-                "evaluator": evaluator,
-                "model_name": model_name,
-                "t_loss_train": t_loss_train,
-                "temporal_contr_optimizer": temporal_contr_optimizer,
-                "loss_module": loss_module,
-                "optim_config": optim_config
-            }
-            train_step_config.update(kwargs_init)
-            loss = train_step(**train_step_config)
+            train_step_kwargs = dict(batch=batch, model=model, device=device, model_name=model_name)
+            train_step_kwargs.update(kwargs)
+            train_step_kwargs.update(kwargs_init)
+            model.train()
+            loss = train_step(**train_step_kwargs)
 
-            if len(loss.shape):
-                loss = loss.reshape(loss.shape[0], -1)
-                loss = torch.mean(loss, dim=-1)
-            if not loss.shape:
-                loss = loss.unsqueeze(0)
+            if isinstance(loss, dict):
+                metrics = dict()
+                for ll in loss:
+                    metrics[ll] = loss[ll].item()
+                batch_loss = loss["loss"]
+                loss = loss["loss"]
             
-            batch_loss = torch.sum(loss)
-            mean_loss = batch_loss / len(loss)  # mean loss (over active elements) used for optimization
+            elif isinstance(loss, torch.Tensor):
+                if len(loss.shape):
+                    loss = loss.reshape(loss.shape[0], -1)
+                    loss = torch.mean(loss, dim=-1)
+                if not loss.shape:
+                    loss = loss.unsqueeze(0)
+                
+                batch_loss = torch.sum(loss)
+                mean_loss = batch_loss / len(loss)  # mean loss (over active elements) used for optimization
+                metrics = {"loss": mean_loss.item()}
 
-            metrics = {"loss": mean_loss.item()}
             if i % print_interval == 0:
                 ending = "" if epoch_num is None else 'Epoch {} '.format(epoch_num)
                 print_callback(i, metrics, prefix='Training ' + ending, total_batches=len(dataloader))
 
             with torch.no_grad():
-                total_active_elements += len(loss)
+                if loss.dim() == 0:
+                    total_active_elements += 1
+                else:
+                    total_active_elements += len(loss)
                 epoch_loss += batch_loss.item()  # add total loss of batch
     else:
         epoch_loss = 0.
         total_active_elements = 1
 
 
-    epoch_loss = epoch_loss / total_active_elements  # average loss per element for whole epoch
+    epoch_loss = epoch_loss / max(total_active_elements, 1)  # average loss per element for whole epoch
     epoch_metrics['epoch'] = epoch_num
     epoch_metrics['loss'] = float(epoch_loss)
     
@@ -111,11 +114,13 @@ def train_epoch(model, dataloader, task, device, loss_module, evaluator,
 
 
 
-@EVALUATOR.register("defalt")
+@EVALUATOR.register("default")
 class PretrainAgg:
     def __init__(self, evaluator) -> None:
         self.per_batch_train = dict()
         self.per_batch_valid = dict()
+        # print(evaluator)
+        # exit()
         self.evaluator = TEST_METHODS.get(evaluator)
     
     def train_module(self, val_loss_module, logger, valid_ratio=0.125, **kwargs):
@@ -133,10 +138,7 @@ class PretrainAgg:
                 logger.info(f"collated data: {k} can not be converted into array.")
 
         
-        test_module_kwargs.update({
-            "valid_ratio": valid_ratio,
-            "loss_module": val_loss_module
-        })
+        test_module_kwargs.update(dict(valid_ratio=valid_ratio, loss_module=val_loss_module))
 
         if self.evaluator is not None:
             self.model = self.evaluator(**test_module_kwargs)
@@ -171,15 +173,21 @@ class PretrainAgg:
             else:
                 self.per_batch_valid[k] = [kwargs[k]]
     
-    def infer(self, **kwargs):
+    def infer(self, dset="valid", **kwargs):
         kwargs_eval = dict()
-        for k in self.per_batch_valid:
+        if dset == "valid":
+            per_batch = self.per_batch_valid
+        elif dset == "train":
+            per_batch = self.per_batch_train
+        for k in per_batch:
             # print(k)
             # for it in self.per_batch_valid[k]:
             #     print(it.shape)
-            kwargs_eval[k] = list2array(self.per_batch_valid[k])
+            kwargs_eval[k] = list2array(per_batch[k])
         kwargs_eval.update(kwargs)
-        results = self.model.evaluate(per_batch=self.per_batch_valid, **kwargs_eval)
+        results = self.model.evaluate(per_batch=per_batch, **kwargs_eval)
+        self.per_batch_valid.update(results)
+        # results = self.model.evaluate(per_batch=self.per_batch_train, **kwargs_eval)
         return results
     
     def clear(self):
@@ -209,6 +217,9 @@ def step_classification(batch, model, device, loss_module, optimizer, **kwargs):
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=4.0)
     optimizer.step()
     return loss
+
+
+
 
 @TRAIN_STEP.register("anomaly_detection")
 def step_anomaly_detection(batch, model, device, loss_module, optimizer, **kwargs):
@@ -263,6 +274,7 @@ def step_mvts_transformer(batch, model, device, loss_module, optimizer, evaluato
     X = X.to(device)
     X[target_masks] = 0
     target_masks = target_masks.to(device)  # 1s: mask and predict, 0s: unaffected input (ignore)
+    padding_masks = torch.ones(X.shape[0], X.shape[2]).to(dtype=bool)
     padding_masks = padding_masks.to(device)  # 0s: ignore
     predictions = model(X.to(device), padding_masks)  # (batch_size, padded_length, feat_dim)
     # Cascade noise masks (batch_size, padded_length, feat_dim) and padding masks (batch_size, padded_length)
@@ -371,11 +383,6 @@ def step_csl(batch, model, device, loss_module, optimizer, optim_config, evaluat
         # print(list(model.state_dict().items())[10])
         loss.backward()
         optimizer.step()
-        # print("epoch")
-        # print(C_accu_q[0], c_normalising_factor_q, C_accu_k[0], c_normalising_factor_k)
-        # raise RuntimeError()
-        # print(list(model.state_dict().items())[10])
-        # raise RuntimeError()
 
     return loss
 
@@ -430,12 +437,22 @@ def step_t_loss(batch, model, device, loss_module, optimizer, t_loss_train, eval
     padding_masks = padding_masks.to(device)  # 0s: ignore
     X_ = X
     X_[target_masks] = 0
-    loss = loss_module(target.permute(0, 2, 1), model, 
+    loss = loss_module(target, model, 
                             t_loss_train, save_memory=False)
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=4.0)
     optimizer.step()
     # evaluator.append_train(model, X=X, label=label, mask=target_masks)
+    return loss
+
+@PRETRAIN_STEP.register("mmfa_rec")
+@PRETRAIN_STEP.register("mmfa")
+def step_mmfa(batch, model, device, loss_module, optimizer, models, evaluator, **kwargs):
+    X = batch["X"].to(device)
+    for t in batch["features"]:
+        batch["features"][t] = batch["features"][t].to(device)
+    
+    loss = loss_module(model, X, models, batch["features"], optimizer)
     return loss
 
 @TRAIN_LOOP_INIT.register("csl")
@@ -473,3 +490,31 @@ def train_init_ts_tcc(model, optim_config, **kwargs):
     return {
         "temporal_contr_optimizer": temporal_contr_optimizer
     }
+
+@TRAINER_INIT.register("mmfa_rec")
+@TRAINER_INIT.register("mmfa")
+def train_init_ts_tcc(optimizer, optim_config, device, **kwargs):
+    transformations = optim_config["transformations"]
+    models = dict()
+    for t in transformations:
+        transformations[t]["model"]["device"] = device
+        models[t] = MODELS.get(transformations[t]["model"]["model_name"]) \
+            (**transformations[t]["model"])
+        if transformations[t]["model"]["model_name"] in ["Gemma", "TinyLlama"]:
+            pass
+        elif isinstance(device, list):
+            # exit()
+            models[t] = models[t].to(device[0])
+            models[t] = torch.nn.DataParallel(models[t], device_ids=device)
+        else:
+            models[t] = models[t].to(device)
+        params = {'params': models[t].parameters(), }
+        if "lr" in transformations[t]["model"]:
+            print( f"{transformations[t]['model']} learning rate: {transformations[t]['model']['lr']}")
+            params["lr"] = transformations[t]["model"]["lr"]
+        optimizer.add_param_group(params)
+        
+            
+    return {
+        "models": models
+    } 

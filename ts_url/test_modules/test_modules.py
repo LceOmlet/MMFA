@@ -1,4 +1,4 @@
-from ..registry import TEST_METHODS
+from ..registry import TEST_METHODS, TRANSFORMATION
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 import numpy as np
@@ -8,10 +8,229 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score    
 from sklearn.decomposition import PCA
 from sklearn.metrics import normalized_mutual_info_score
-from sklearn.cluster import KMeans
-from sklearn.metrics import rand_score
+from sklearn.cluster import KMeans, DBSCAN, SpectralClustering
+from sklearn.metrics import rand_score, f1_score, accuracy_score, precision_score, recall_score
 from sklearn.preprocessing import RobustScaler
 from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import GradientBoostingClassifier, HistGradientBoostingClassifier
+from sklearn.ensemble import IsolationForest
+
+def reconstruct_label(timestamp, label):
+    timestamp = np.asarray(timestamp, np.int64)
+    index = np.argsort(timestamp)
+
+    timestamp_sorted = np.asarray(timestamp[index])
+    interval = np.min(np.diff(timestamp_sorted))
+
+    label = np.asarray(label, np.int64)
+    label = np.asarray(label[index])
+
+    idx = (timestamp_sorted - timestamp_sorted[0]) // interval
+
+    new_label = np.zeros(shape=((timestamp_sorted[-1] - timestamp_sorted[0]) // interval + 1,), dtype=int)
+    new_label[idx] = label
+
+    return new_label
+
+# consider delay threshold and missing segments
+def get_range_proba(predict, label, delay=7):
+    # print(np.sum(predict))
+    splits = np.where(label[1:] != label[:-1])[0] + 1
+    is_anomaly = label[0] == 1
+    new_predict = np.array(predict)
+    pos = 0
+    pred_entities = 0
+    label_entities = 0
+
+    for sp in splits:
+        if is_anomaly:
+            anomaly_pred_entity = np.sum(predict[pos: max(pos + delay + 1, sp)])
+            if anomaly_pred_entity:
+                pred_entities += anomaly_pred_entity
+                assert sp > pos
+                label_entities += sp - pos
+                new_predict[pos: sp] = 1
+            else:
+                new_predict[pos: sp] = 0
+        is_anomaly = not is_anomaly
+        pos = sp
+    sp = len(label)
+
+    if is_anomaly:  # anomaly in the end
+        if 1 in predict[pos: max(pos + delay + 1, sp)]:
+            new_predict[pos: sp] = 1
+        else:
+            new_predict[pos: sp] = 0
+    # print(np.sum(new_predict))
+    f_scale = label_entities / max(pred_entities , 1)
+    return new_predict, f_scale
+
+
+def regulize_anom_label_pred(predict, label, delay=7):
+    test_timestamps = range(len(label))
+    label = reconstruct_label(test_timestamps, label)
+    predict = reconstruct_label(test_timestamps, predict)
+    predict, f_scale = get_range_proba(predict, label, delay)
+    label, predict = label.astype(bool), predict.astype(bool)
+    tp = np.sum(label & predict)
+    fp = np.sum((~label) & predict)
+    fn = np.sum(label & (~predict))
+    tn = np.sum((~label) & (~predict))
+    # print(tn)
+    # print(predict == 0 )
+    precision = tp / (tp + fp * f_scale + 1e-7)
+    # if tp == 0:
+    #     exit()
+    recall = tp / (tp + fn + 1e-7)
+    f1 = (2 * precision * recall) / (precision + recall + 1e-7)
+    acc = (tp + tn) / (tp + tn + fn + fp * f_scale)
+    # print(tp, tn, fp, fn)
+    return f1, precision, recall, acc, predict, label
+
+
+def moving_mean(arr, window):
+    """
+    计算移动平均值，使用NumPy的卷积函数，并在两端进行边缘填充。
+    参数:
+    arr: 输入数组
+    window: 滑动窗口的大小
+
+    返回:
+    移动平均值的数组
+    """
+    # 创建一个等于窗口大小的、值为1/window的数组，作为卷积核
+    kernel = np.ones(window) / window
+    # 边缘填充，填充长度为(window-1)//2，以保持输出长度与输入长度相同
+    pad_width = (window - 1) // 2
+    padded_arr = np.pad(arr, pad_width, mode='edge')
+    # 使用np.convolve计算卷积，'same'模式以保持输出和输入长度相同
+    return np.convolve(padded_arr, kernel, mode='same')[pad_width:-pad_width]
+
+DELAY = 0
+@TEST_METHODS.register("isolation")
+class IsolationForest_:
+    def __init__(self, repr, **kwargs) -> None:
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        
+
+    def evaluate(self, repr, label, per_batch, **kwargs):
+        # repr = self.scaler.fit_transform(repr)
+        conts = [0.001 + 0.002*i for i in range(10)]
+        best_f1 = 0
+        best_acc = 0
+        best_cc = 0
+        for cc in conts:
+            self.isolat = IsolationForest(contamination=cc)
+            pred = self.isolat.fit_predict(repr) == -1
+            for delay in range(1, 20):
+                f1, precision, recall, acc, predict, label = regulize_anom_label_pred(pred, label, delay=delay)
+                if f1 >= best_f1:
+                    best_f1 = f1
+                    best_acc = acc
+                    best_cc = cc
+                    best_predict = predict
+                    DELAY = delay
+                    best_precision = precision
+                    best_recall = recall
+        print(f"best delay: {DELAY}")
+        print(f"best cc: {best_cc}")
+        # print(label.shape)
+        # raise RuntimeError()
+        return {
+            "f1": best_f1,
+            "accuracy": best_acc,
+            "precision": best_precision,
+            "recall": best_recall,
+            "predict": best_predict
+        }
+    @staticmethod
+    def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
+        return {
+            "repr": model.encode(X, **kwargs)
+        }
+
+def np_shift(arr, num, fill_value=np.nan):
+    result = np.empty_like(arr)
+    if num > 0:
+        result[:num] = fill_value
+        result[num:] = arr[:-num]
+    elif num < 0:
+        result[num:] = fill_value
+        result[:num] = arr[-num:]
+    else:
+        result[:] = arr
+    return result
+
+@TEST_METHODS.register("loss_ad")
+class AlignmentLossScore:
+    def __init__(self, repr, **kwargs) -> None:
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        
+
+    def evaluate(self, repr, repr_aug, label, per_batch, **kwargs):
+        # repr = self.scaler.fit_transform(repr)
+        test_err = np.abs(repr - repr_aug).sum(axis=1)
+        ma = moving_mean(test_err, 21)
+        test_err_adj = (test_err - ma) / ma
+
+
+        thr = np.mean(test_err_adj) + 4 * np.std(test_err_adj)
+        pred = (test_err_adj > thr) * 1
+
+        print(f"total anoms: {sum(label)}")
+        print(f"total pred: {sum(pred)}")
+        # print(label.shape)
+        # raise RuntimeError()
+        print(repr.shape)
+
+        f1 = f1_score(pred, label)
+        acc = accuracy_score(pred, label)
+
+        return {
+            "F1": f1,
+            "accuracy": acc
+        }
+    @staticmethod
+    def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
+        return {
+            "repr": model.encode(X, **kwargs),
+            "repr_aug": model.encode(
+                X + torch.randn(X.shape).to(X.device) * 1e-3, **kwargs
+            )
+        }
+
+
+@TEST_METHODS.register("spec")
+class KmeanModule:
+    def __init__(self, **kwargs):
+        pass
+    
+    def evaluate(self, repr, label, per_batch, **kwargs):
+        label_num = len(set(label)) 
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        # print(repr.shape)
+        # raise RuntimeError()
+        pca = PCA(n_components=10)
+        reps = pca.fit_transform(repr)
+        kmeans = SpectralClustering(label_num)
+        pred = kmeans.fit_predict(reps)
+        NMI_score = normalized_mutual_info_score(label, pred)
+        RI_score = rand_score(label, pred)
+        per_batch["clustering_rst"] = pred
+        return {"NMI":NMI_score, "RI": RI_score}
+    
+    @staticmethod
+    def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
+        return {
+            "repr": model.encode(X, **kwargs)
+        }
+
 
 @TEST_METHODS.register("kmeans")
 class KmeanModule:
@@ -19,7 +238,11 @@ class KmeanModule:
         pass
     
     def evaluate(self, repr, label, per_batch, **kwargs):
-        label_num = np.max(label) + 1
+        label_num = len(set(label)) 
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        # print(repr.shape)
+        # raise RuntimeError()
         pca = PCA(n_components=10)
         reps = pca.fit_transform(repr)
         kmeans = KMeans(label_num)
@@ -31,11 +254,61 @@ class KmeanModule:
     
     @staticmethod
     def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
         return {
             "repr": model.encode(X, **kwargs)
         }
 
+@TEST_METHODS.register("gbdt")
+class GBDT:
+    def __init__(self, repr, label, **kwargs) -> None:
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        self.gbdt = GradientBoostingClassifier().fit(repr, label)
 
+    def evaluate(self, repr, label, **kwargs):
+        repr = self.scaler.fit_transform(repr)
+        pred = self.gbdt.predict(repr)
+        report = classification_report(pred, label)
+        score = accuracy_score(pred, label)
+        return {
+            "report": report,
+            "accuracy": score
+        }
+    
+    @staticmethod
+    def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
+        rst = {
+            "repr": model.encode(X, **kwargs)
+        }
+        return rst
+    
+@TEST_METHODS.register("hgbdt")
+class HGBDT:
+    def __init__(self, repr, label, **kwargs) -> None:
+        self.scaler = RobustScaler()
+        repr = self.scaler.fit_transform(repr)
+        self.gbdt = HistGradientBoostingClassifier().fit(repr, label)
+
+    def evaluate(self, repr, label, **kwargs):
+        repr = self.scaler.fit_transform(repr)
+        pred = self.gbdt.predict(repr)
+        report = classification_report(pred, label)
+        score = accuracy_score(pred, label)
+        return {
+            "report": report,
+            "accuracy": score
+        }
+    
+    @staticmethod
+    def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
+        rst = {
+            "repr": model.encode(X, **kwargs)
+        }
+        return rst
+    
 @TEST_METHODS.register("svm")
 class SVMModule:
     def __init__(self, repr, label, kernel="rbf", gamma='scale', search=False, **kwargs):
@@ -45,7 +318,7 @@ class SVMModule:
         C_best = None    
         for C in [10 ** i for i in range(-4, 5)]:
             clf = SVC(C=C, random_state=42)
-            acc_i = cross_val_score(clf, repr, label, cv=5,)
+            acc_i = cross_val_score(clf, repr, label, cv=4,)
             if acc_i.mean() > acc_val:
                 C_best = C
         self.svc = SVC(kernel=kernel, gamma=gamma, C=C_best)
@@ -56,8 +329,10 @@ class SVMModule:
         # scaler = RobustScaler()
         repr = self.scaler.fit_transform(repr)
         pred = self.svc.predict(repr)
+        # raise RuntimeError()
         report = classification_report(pred, label)
         score = accuracy_score(pred, label)
+        
         return {
             "report": report,
             "accuracy": score 
@@ -65,6 +340,7 @@ class SVMModule:
     
     @staticmethod
     def collate(model, X, **kwargs):
+        kwargs.pop("mask", None)
         rst = {
             "repr": model.encode(X, **kwargs)
         }
@@ -89,6 +365,7 @@ class LRModule:
     
     @staticmethod
     def collate(model, X, **kwargs):
+        kwargs.pop("mask")
         return {
             "repr": model.encode(X, **kwargs)
         }
@@ -131,7 +408,7 @@ class RidgeModule:
     def collate(model, X, mask, **kwargs):
         # X = X.detach().clone()
         target= X
-        X[mask] = 0
+        # X[mask] = 0
         kwargs["padding_masks"] = mask
         return {
             "repr": model.encode(X, **kwargs),

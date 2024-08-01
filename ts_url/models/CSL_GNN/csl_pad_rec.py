@@ -16,9 +16,25 @@ from torch_geometric.utils import to_undirected
 from ...registry import MODELS
 __all__ = ["LearningShapeletsModelMixDistancesGCN"]
 
+class ReverseMaxCrossCorrelationBlock(nn.Module):
+    def __init__(self, shapelets_size, num_shapelets, in_channels=1):
+        super(ReverseMaxCrossCorrelationBlock, self).__init__()
+        self.reverse_shapelets = nn.ConvTranspose1d(in_channels=num_shapelets,
+                                                    out_channels=in_channels,
+                                                    kernel_size=shapelets_size)
+        self.in_channels = in_channels
+        self.shapelets_size = shapelets_size
+
+    def forward(self, x, masking=False):
+        pad_size = (self.shapelets_size -1)// 2
+        x = self.reverse_shapelets(x)
+        x = x[:,:, pad_size: -pad_size - (self.shapelets_size -1) % 2]
+        return x
+        
+
 class MinEuclideanDistBlock(nn.Module):
   
-    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=True):
+    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=False):
         super(MinEuclideanDistBlock, self).__init__()
         self.to_cuda = to_cuda
         self.num_shapelets = num_shapelets
@@ -87,7 +103,7 @@ class MinEuclideanDistBlock(nn.Module):
         
 class MaxCosineSimilarityBlock(nn.Module):
    
-    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=True):
+    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=False):
         super(MaxCosineSimilarityBlock, self).__init__()
         self.to_cuda = to_cuda
         self.num_shapelets = num_shapelets
@@ -154,11 +170,11 @@ class MaxCosineSimilarityBlock(nn.Module):
         return x
 
    
-        
+
 
 class MaxCrossCorrelationBlock(nn.Module):
    
-    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=True):
+    def __init__(self, shapelets_size, num_shapelets, in_channels=1, to_cuda=False):
         super(MaxCrossCorrelationBlock, self).__init__()
         self.shapelets = nn.Conv1d(in_channels, num_shapelets, kernel_size=shapelets_size)
         self.reverse_shapelets = nn.ConvTranspose1d(in_channels=self.shapelets.out_channels,
@@ -183,6 +199,7 @@ class MaxCrossCorrelationBlock(nn.Module):
         
         
     def forward(self, x, masking=False):
+        # print(self.in_channels)
         if self.in_channels == 1:
             new_x = [] 
             x = x.permute(1,0,2)       
@@ -204,17 +221,20 @@ class MaxCrossCorrelationBlock(nn.Module):
             pad_size = (self.shapelets_size -1)// 2
             dim = x.shape[1]
             x = F.pad(x, (pad_size, pad_size + (self.shapelets_size -1) % 2))
+            # print(x.shape)
             x = self.shapelets(x)
-            x = x.unsqueeze(1)
+            # print(x.shape)
+            # x = x.unsqueeze(1)
             # print(dim)
-            x = x.tile(1, dim, 1, 1)
-            x = x.permute(0, 1, 3, 2)
+            # x = x.tile(1, dim, 1, 1)
+            x = x.permute(0, 2, 1)
             # x, _ = torch.max(x, 2, keepdim=True)
             # print(x.shape)
             # exit()
         if masking:
             mask = generate_binomial_mask(x.shape)
             x *= mask
+
         
         return x
 
@@ -224,7 +244,7 @@ class MaxCrossCorrelationBlock(nn.Module):
 
 class ShapeletsDistBlocks(nn.Module):
    
-    def __init__(self, shapelets_size_and_len, in_channels=1, dist_measure='euclidean', to_cuda=True, checkpoint=False):
+    def __init__(self, shapelets_size_and_len, in_channels=1, dist_measure='euclidean', to_cuda=False, checkpoint=False):
         super(ShapeletsDistBlocks, self).__init__()
         self.checkpoint = checkpoint
         self.to_cuda = to_cuda
@@ -257,31 +277,47 @@ class ShapeletsDistBlocks(nn.Module):
                                                             num_shapelets=num_shapelets - 2 * num_shapelets//3,
                                                             in_channels=in_channels, to_cuda=self.to_cuda))
             self.blocks = nn.ModuleList(module_list)
-        
+
         else:
             raise ValueError("dist_measure must be either of 'euclidean', 'cross-correlation', 'cosine'")
 
     def forward(self, x, masking=False):
        
-        out = []
+        out_list = []
         for block in self.blocks:
             if self.checkpoint and self.dist_measure != 'cross-correlation':
-                out.append(checkpoint(block, x, masking))
-            
+                # out = torch.cat((out, checkpoint(block, x, masking)), dim=-1)
+                out_list.append(checkpoint(block, x, masking))
             else:
-                out.append(block(x, masking))
-        out = torch.cat(out, dim=-1)
-
+                # out = torch.cat((out, block(x, masking)), dim=-1)
+                out_list.append(block(x, masking))
+        out = torch.cat(out_list, dim=-1)
         return out
 
+class ReverseShapeletsDistBlocks(nn.Module):
 
+    def __init__(self, shapelets_size_and_len, in_channels=1):
+        super(ReverseShapeletsDistBlocks, self).__init__()
+        reverse_list = []
+        self.shapelets_size_and_len = shapelets_size_and_len
+        for shapelets_size, num_shapelets, in self.shapelets_size_and_len.items():
+            reverse_list.append(ReverseMaxCrossCorrelationBlock(shapelets_size=shapelets_size, num_shapelets=num_shapelets, in_channels=in_channels))
+        self.module_list = nn.ModuleList(reverse_list)
+        self.shapelets_size_and_len = shapelets_size_and_len
+    
+    def forward(self, spectrogram, masking=False):
+        shape_idx = 0
+        out = 0
+        for idx, (shapelet_size, num_shapelets) in enumerate(self.shapelets_size_and_len.items()):
+            out += self.module_list[idx](spectrogram[:, shape_idx: shape_idx + num_shapelets])
+            shape_idx += num_shapelets
+        return out
 
-  
 
 class LearningShapeletsModel(nn.Module):
    
     def __init__(self, shapelets_size_and_len, in_channels=1, num_classes=2, dist_measure='euclidean',
-                 to_cuda=True, checkpoint=False):
+                 to_cuda=False, checkpoint=False):
         super(LearningShapeletsModel, self).__init__()
 
         self.to_cuda = to_cuda
@@ -326,17 +362,17 @@ class LearningShapeletsModel(nn.Module):
    
   
 
-@MODELS.register("mmfa")
-class LearningShapeletsModelMixDistancesGCN(nn.Module):
+@MODELS.register("mmfa_rec")
+class LearningShapeletsModelMixDistancesRec(nn.Module):
    
     def __init__(self, feat_dim=1, num_classes=None, max_len=224, dist_measure='mix',
-                 to_cuda=True, checkpoint=False, output_dim=320, **kwargs):
-        super(LearningShapeletsModelMixDistancesGCN, self).__init__()
+                 to_cuda=False, checkpoint=False, output_dim=320, **kwargs):
+        super(LearningShapeletsModelMixDistancesRec, self).__init__()
         len_ts = max_len
         in_channels = feat_dim
 
         # len_ts = 224
-        num_shapelets = output_dim // 8
+        num_shapelets = 40
         dim_out = num_shapelets * 8
         self.output_dim = output_dim
         shapelets_size_and_len = {int(i): num_shapelets for i in np.linspace(min(128, max(3, int(0.1 * len_ts))), int(0.8 * len_ts), 8, dtype=int)}
@@ -347,17 +383,17 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
         self.shapelets_size_and_len = shapelets_size_and_len
         self.num_shapelets = sum(shapelets_size_and_len.values())
         
-        self.shapelets_euclidean = ShapeletsDistBlocks(in_channels=in_channels,
-                                                    shapelets_size_and_len={item[0]: item[1] // 3 for item in shapelets_size_and_len.items()},
-                                                    dist_measure='euclidean', to_cuda=to_cuda, checkpoint=checkpoint)
+        # self.shapelets_euclidean = ShapeletsDistBlocks(in_channels=in_channels,
+        #                                             shapelets_size_and_len={item[0]: item[1] // 3 for item in shapelets_size_and_len.items()},
+        #                                             dist_measure='euclidean', to_cuda=to_cuda, checkpoint=checkpoint)
         
         
-        self.shapelets_cosine = ShapeletsDistBlocks(in_channels=in_channels,
-                                                    shapelets_size_and_len={item[0]: item[1] // 3 for item in shapelets_size_and_len.items()},
-                                                    dist_measure='cosine', to_cuda=to_cuda, checkpoint=checkpoint)
+        # self.shapelets_cosine = ShapeletsDistBlocks(in_channels=in_channels,
+        #                                             shapelets_size_and_len={item[0]: item[1] for item in shapelets_size_and_len.items()},
+        #                                             dist_measure='cosine', to_cuda=to_cuda, checkpoint=checkpoint)
         
         self.shapelets_cross_correlation = ShapeletsDistBlocks(in_channels=in_channels,
-                                                    shapelets_size_and_len={item[0]: item[1] - 2 * (item[1] // 3) for item in shapelets_size_and_len.items()},
+                                                    shapelets_size_and_len={item[0]: item[1] for item in shapelets_size_and_len.items()},
                                                     dist_measure='cross-correlation', to_cuda=to_cuda, checkpoint=checkpoint)
         
         
@@ -369,9 +405,9 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
                                               #nn.Linear(self.num_shapelets, 128)
                                         )
         # print(sum(num // 3 for num in self.shapelets_size_and_len.values()))
-        self.bn1 = nn.BatchNorm2d(num_features=sum(num // 3 for num in self.shapelets_size_and_len.values()))
-        self.bn2 = nn.BatchNorm2d(num_features=sum(num // 3 for num in self.shapelets_size_and_len.values()))
-        self.bn3 = nn.BatchNorm2d(num_features=sum(num - 2 * (num // 3) for num in self.shapelets_size_and_len.values()))
+        self.bn1 = nn.BatchNorm1d(num_features=sum(num // 3 for num in self.shapelets_size_and_len.values()))
+        self.bn2 = nn.BatchNorm1d(num_features=sum(num for num in self.shapelets_size_and_len.values()))
+        self.bn3 = nn.BatchNorm1d(num_features=sum(num for num in self.shapelets_size_and_len.values()))
         
         self.projection2 = nn.Sequential(nn.Linear(self.num_shapelets, 256),
                                               nn.ReLU(),
@@ -380,6 +416,7 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
         self.act = get_activation_fn('gelu')
         
         self.outpt = nn.Linear(dim_out, output_dim)
+        self.reverse = ReverseShapeletsDistBlocks(shapelets_size_and_len, in_channels=in_channels)
         
         self.projector = Projector("4096-8192", output_dim)
 
@@ -404,28 +441,30 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
         
         out = []
         
-        x_out = self.shapelets_euclidean(x, masking)
-        # print(x_out.shape)
+        # x_out = self.shapelets_euclidean(x, masking)
+        # # print(x_out.shape)
+        # x_out = self.bn1(x_out.permute(0, 3, 2 ,1)).permute(0, 3, 2 ,1)
+        # out = torch.cat((out, x_out), dim=-1)
         
-        x_out = self.bn1(x_out.permute(0, 3, 2 ,1)).permute(0, 3, 2 ,1)
-        out.append(x_out)
-        
-        x_out = self.shapelets_cosine(x, masking)
-        x_out = self.bn2(x_out.permute(0, 3, 2 ,1)).permute(0, 3, 2 ,1)
-        out.append(x_out)
+        # x_out = self.shapelets_cosine(x, masking)
+        # # print(x_out.shape)
+        # x_out = self.bn2(x_out.permute(0, 3, 2 ,1)).permute(0, 3, 2 ,1)
+        # out = torch.cat((out, x_out), dim=-1)
         
         x_out = self.shapelets_cross_correlation(x, masking)
-        x_out = self.bn3(x_out.permute(0, 3, 2 ,1)).permute(0, 3, 2 ,1)
+        # print(x_out.shape)
+        x_out = self.bn3(x_out.permute(0, 2 ,1)).permute(0, 2 ,1)
         out.append(x_out)
-        
+
         out = torch.cat(out, dim=-1)
 
-        bs, c, l, s = out.shape
+        bs, l, s = out.shape
         # out_ = self.res(out.permute(0, 1, 3, 2).reshape(bs * c, s, l))
         # out_ = out_.reshape(bs, c, self.output_dim)
         # out_ = out_.mean(dim=1)
-
-        out, _ = torch.max(out, dim=2)
+        
+        spectrogram = out
+        out, _ = torch.max(spectrogram, dim=1)
         # 创建一个包含所有节点对的完全图
         # print(out.shape)
         # exit()
@@ -433,10 +472,20 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
         edge_index = torch.tensor([[i, j] for i in range(N) for j in range(N) if i != j], dtype=torch.long).t().cuda()
 
         # 对于无向图，使用下面的代码将边转换为无向边
-        # edge_index = to_undirected(edge_index)
-        out_ = torch.mean(out, dim=1)
+        edge_index = to_undirected(edge_index)
+        # out_ = torch.mean(out, dim=1)
         # out = self.gcn(out, edge_index, None)
-        out = out_
+        spectrogram = spectrogram.permute(0, 2, 1)
+        high_energy_spot = torch.argmax(spectrogram, dim=2)
+        # print(high_energy_spot)
+        # print(high_energy_spot.shape)
+        new_spectrogram = torch.zeros_like(spectrogram).reshape(-1)
+        # print(out.shape)
+        # print(new_spectrogram.shape)
+        new_spectrogram[high_energy_spot] = out
+        new_spectrogram = new_spectrogram.reshape(spectrogram.shape)
+
+        # print(torch.max(new_spectrogram))
 
 
         out = out.reshape(n_samples, -1)
@@ -451,9 +500,12 @@ class LearningShapeletsModelMixDistancesGCN(nn.Module):
         #print(out.shape)
         #out = self.projection(out)
         multi_scale_shapelet_energy = [out[:, length_i * self.num_shapelets: (length_i + 1) * self.num_shapelets] for length_i in range(self.num_shapelets_length)]
+
+        
         
         if train:
-            return feature, project, multi_scale_shapelet_energy   
+            rec_ts = self.reverse(spectrogram)
+            return feature, project, multi_scale_shapelet_energy, rec_ts
 
         z = feature
         if hasattr(self, "logits"):
@@ -479,6 +531,6 @@ if __name__ == "__main__":
     sample = samples[:10].to(torch.float).cuda()
     sample = torch.nn.functional.interpolate(sample, size=(1000, ))
     print(sample.shape)
-    SMMD = LearningShapeletsModelMixDistances(to_cuda=True)
+    SMMD = LearningShapeletsModelMixDistances(to_cuda=False)
     out = SMMD(sample)
     print(out[0].shape)

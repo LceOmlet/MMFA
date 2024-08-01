@@ -15,3 +15,11 @@ tsaug==0.2.1
 scikit-learn==1.3.0
 tslearn==0.6.3
 matplotlib==3.7.1
+bitsandbytes
+pandas
+sktime
+pyts
+# peft==0.8.2
+# transformers==4.37.2
+# PyWavelets==1.4.1
+# fastai==2.7.14

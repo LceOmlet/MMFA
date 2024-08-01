@@ -42,6 +42,7 @@ TRAIN_FN = Registry()
 DATALOADERS = Registry()
 PRETRAIN_LOADERS = Registry()
 COLLATE_FN = Registry()
+DATASET = Registry()
 
 
 # MODELS: model classes with specific archietectures.
@@ -49,7 +50,7 @@ COLLATE_FN = Registry()
 MODELS = Registry()
 
 
-# Members: "defalt"
+# Members: "default"
 EVALUATOR = Registry()
 # Members: 'kmeans', 'svm', 'logistic_regression', 'ridge'
 TEST_METHODS = Registry()
@@ -80,3 +81,5 @@ TRAINER_INIT = Registry()
 TRAIN_LOOP_INIT = Registry()
 # Member: 'pretraining'
 EVAL_LOOP_INIT = Registry()
+
+TRANSFORMATION = Registry()

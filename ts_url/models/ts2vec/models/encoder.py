@@ -39,6 +39,9 @@ class TSEncoder(nn.Module):
         self.repr_dropout = nn.Dropout(p=0.1)
         
     def forward(self, x, mask=None):  # x: B x T x input_dims
+        x = x.permute(0, 2, 1)
+        if mask is not None:
+            mask = mask.permute(0, 2, 1)
         nan_mask = ~x.isnan().any(axis=-1)
         if isinstance(mask, torch.Tensor): x[mask] = 0; mask=None
         x[~(nan_mask)] = 0

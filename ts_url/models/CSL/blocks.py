@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from collections import OrderedDict
-
+from ...utils.utils import Projector
 
 from .utils import generate_binomial_mask
 
@@ -309,12 +309,16 @@ class LearningShapeletsModelMixDistances(nn.Module):
         self.projection2 = nn.Sequential(nn.Linear(self.num_shapelets, 256),
                                               nn.ReLU(),
                                               nn.Linear(256, 128))
+
+        self.projector = Projector("4096-8192", 320)
         
         if self.to_cuda:
             self.cuda()
 
     def forward(self, x, optimize='acc', masking=False):
-        x = x.permute(0, 2, 1)
+        x = x
+        # print(x[0])
+        # raise RuntimeError()
 
         
         n_samples = x.shape[0]

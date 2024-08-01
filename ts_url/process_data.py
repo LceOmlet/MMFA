@@ -9,6 +9,15 @@ import random
 import tsaug
 from itertools import permutations
 from random import shuffle
+import tqdm
+from torch.nn import functional as F
+from copy import deepcopy
+import pywt
+from .registry import TRANSFORMATION, DATASET
+from collections import defaultdict
+from .ad_datasets import UCR, data_generator1
+from. utils.utils import normalize
+from torch import nn
 # import tfsnippet as spt
 
 interfusion = ['omi-6', 'omi-9', 'omi-4', 'omi-7', 'machine-2-2', 'omi-10', 'omi-8', 'omi-11', 'machine-1-7', 
@@ -21,6 +30,21 @@ interfusion = ['omi-6', 'omi-9', 'omi-4', 'omi-7', 'machine-2-2', 'omi-10', 'omi
 interfusion = set([dsid.lower() for dsid in interfusion])
 # UCR_dsid = set([dsid.lower() for dsid in MTSC_datasets + UCR_multivariate_list])
 
+def squeeze_to_dim(data, dim=3):
+	data_dim = len(data.shape)
+	to_squeeze = max(data_dim - dim, 0)
+	if to_squeeze:
+		for idx in range(data_dim):
+			if data.shape[idx] == 0:
+				if to_squeeze > 0:
+					to_squeeze -= 1
+					data = data.squeeze(idx)
+				else:
+					break
+	return data
+			
+		
+		
 class Dls:
 	def __init__(self, X, splits, y=None) -> None:
 		train_splits = splits[0]
@@ -75,36 +99,6 @@ def scaling(x, sigma=1.1):
 		ai.append(np.multiply(xi, factor[:, :])[:, np.newaxis, :])
 	return np.concatenate((ai), axis=1)
 
-def normalize(memmap, norm_type):
-	"""
-	Args:
-		memmap: input dataframe
-	Returns:
-		dmemmapf: normalized dataframe
-	"""
-	if norm_type == "standardization":
-		mean = memmap.mean()
-		std = memmap.std()
-		return (memmap - mean) / (std + np.finfo(float).eps)
-	
-	if norm_type == "z_normalization":
-		return (memmap - np.mean(memmap, axis=-1, keepdims=True)) / (np.finfo(float).eps + np.std(memmap, axis=-1, keepdims=True))
-
-	elif norm_type == "minmax":
-		max_val = np.max(memmap)
-		min_val = np.min(memmap)
-		return (memmap - min_val) / (max_val - min_val + np.finfo(float).eps)
-
-	elif norm_type == "per_sample_std":
-		return (memmap - np.mean(memmap, axis=0)) / np.std(memmap, axis=0)
-
-	elif norm_type == "per_sample_minmax":
-		min_vals = np.min(memmap, axis=0)
-		max_vals = np.max(memmap, axis=0)
-		return (memmap - min_vals) / (max_vals- min_vals + np.finfo(float).eps)
-
-	else:
-		raise (NameError(f'Normalize method "{norm_type}" not implemented'))
 
 def padding_mask(lengths, max_len=None):
 	"""
@@ -342,6 +336,12 @@ def get_unsupervised_data(dsid, filepath="", train_ratio=1, test_ratio=1, window
 		train_size = X.shape[0]
 		test_size = X_test.shape[0]
 		splits = [list(range(train_size)), list(range(train_size, train_size + test_size))]
+		if X.shape[2] != X_test.shape[2]:
+			print(f"X length: {X.shape[2]}, and X_test length: {X_test.shape[2]} dosen't match.")
+			if X.shape[2] > X_test.shape[2]:
+				X = X[:, :, :X_test.shape[2]]
+			else:
+				X_test = X_test[:, :, :X.shape[2]]
 		X = np.concatenate([X, X_test], axis=0)
 		X = set_nan_to_zero(X)
 		y = np.concatenate([y, y_test], axis=0)
@@ -353,11 +353,24 @@ def get_datas(data_configs, **kwargs):
 	y_ = None
 	split_ = None
 	curr_len = 0
+	dls_cfg = dict()
 	# tfms = [None, TSClassification()]
 	# batch_tfms = [TSStandardize(by_sample=True)]
 	for data_config in data_configs:
 		# print(data_config)
-		X, y, splits_v2 = get_unsupervised_data(**data_config)
+		if "ad_ucr" in data_config["dsid"]:
+			ucr = UCR("./data")
+			d_idx = int(data_config["dsid"].split('_')[-1])
+			data, meta_data = ucr.__getitem__(d_idx)
+			train_time_series = data[meta_data.trainval].to_numpy()
+			test_time_series = data[~meta_data.trainval].to_numpy()
+			train_label = meta_data.anomaly[meta_data.trainval].to_numpy()
+			test_label = meta_data.anomaly[~meta_data.trainval].to_numpy()
+			configs = {'input_feat_dim': 11, 'seq_len': 217, 'sample_num': 6668, 'label_num': 39, "time_step": 4, "window_size": 256}
+			X, y, splits_v2, test_anomaly_window_num = data_generator1(train_time_series, test_time_series, train_label, test_label, configs)
+			dls_cfg["test_anomaly_window_num"] = test_anomaly_window_num
+		else:
+			X, y, splits_v2 = get_unsupervised_data(**data_config)
 		if isinstance(X_, type(None)):
 			X_ = X
 			y_ = y
@@ -376,17 +389,26 @@ def get_datas(data_configs, **kwargs):
 	# raise RuntimeError()
 	# if y_.dtype != np.dtype('<U3') and y_.dtype != np.dtype('<U2'):
 	# 	tfms[1] = None
+	y_ = y_.reshape(-1)
+	if X_.shape[1] > 64:
+		X_ = torch.tensor(X_)
+		adaptive_avgpool = nn.AdaptiveAvgPool2d(output_size=(64, X_.shape[-1]))
+		X_ = adaptive_avgpool(X_)
+		X_ = X_.numpy()
+	if X_.shape[-1] > 1200:
+		X_ = X[..., 1200:]
 	if y_ is not None:
 		dls = Dls(X_, y=y_, splits=split_)
 	else:
 		dls = Dls(X_, splits=split_)
-	y_ = y_.reshape(-1)
-	return dls, {
+	
+	dls_cfg.update({
 		"input_feat_dim": X_.shape[1], 
 		"seq_len": X_.shape[2], 
 		"sample_num":X_.shape[0],
-		"label_num": len(set(y_))
-	}
+		"label_num": len(set(y_)),
+	})
+	return dls, dls_cfg
 
 
 def get_unsupervised_datas(data_configs):
@@ -485,13 +507,78 @@ def noise_mask(X, masking_ratio, lm=3, mode='separate', distribution='geometric'
 
 	return mask
 
+@DATASET.register("mmfa_rec")
+@DATASET.register("mmfa")
+class AugmentationDataset(Dataset):
+	def __init__(self, data, d_name, optim_config, label=None, **kwargs):
+		super(AugmentationDataset, self).__init__()
+		transformations = optim_config["transformations"]
+		if label is not None:
+			self.label = label
+		else:
+			self.label = None
+		self.transformations_params = transformations
+		self.transformations = dict()
+		data = np.array(data)
+		# data = np.transpose(np.array(data), (-1, -2))
+		for t in transformations:
+			t_ = deepcopy(transformations[t])
+			t_["X"] = data
+			t_["d_name"] = d_name
+			t_["y"] = label
+			# print(t)
+			self.transformations[t] = TRANSFORMATION.get(t)(**t_)
+		
+		data = torch.tensor(data).float()
+		data = squeeze_to_dim(data, 3)
+		
+		self.data = data
+		# print(self.data[0])
+		# raise RuntimeError()
+		self.IDs = list(range(len(data)))
+		if optim_config.get("main_transformation") is not None:
+			self.main_transformation = TRANSFORMATION.get(
+				optim_config["main_transformation"][0]
+			)(X = data,  ** optim_config["main_transformation"][1])
+			self.x_trans = True
+		else:
+			self.x_trans = False
+		
+	def __getitem__(self, index):
+		X = self.data[self.IDs[index]]
+		if self.x_trans:
+			X = self.main_transformation.transform(X.unsqueeze(0), index)
+		if self.label is not None:
+			label = self.label[self.IDs[index]]
+		else:
+			label = None
+		transformation_rst = dict()
+		for t in self.transformations_params:
+			t_ = deepcopy(self.transformations_params[t])
+			t_.update({"x": X, "index": index})
+			transformation_rst[t] = self.transformations[t].transform(**t_).squeeze(0)
+		X = X.squeeze(0)
+		rst = {
+			"X": X,
+			"label": label,
+			"ID": self.IDs[index]
+		}
+		rst["features"] = transformation_rst
+		return rst
+	
+	def __len__(self):
+		return len(self.IDs)
 
-
+@DATASET.register("csl")
+@DATASET.register("ts2vec")
+@DATASET.register("ts_tcc")
+@DATASET.register("t_loss")
+@DATASET.register("mvts_transformer")
 class ImputationDataset(Dataset):
 	"""Dynamically computes missingness (noise) mask for each sample"""
 
 	def __init__(self, data, mean_mask_length=3, masking_ratio=0.15, 
-				 mode='separate', distribution='geometric', label=None, exclude_feats=None, mask_row=True):
+				 mask_mode='separate', mask_distribution='geometric', label=None, exclude_feats=None, mask_row=True, **kwargs):
 		super(ImputationDataset, self).__init__()
 
 		
@@ -499,15 +586,18 @@ class ImputationDataset(Dataset):
 			self.label = label
 		else:
 			self.label = None
-
-		self.data = torch.tensor(data)  # this is a subclass of the BaseData class in data.py
-		self.data = torch.squeeze(self.data)
+		
+		self.data = torch.tensor(data).float()  # this is a subclass of the BaseData class in data.py
+		# print(self.data[0])
+		# raise RuntimeError()
+		# self.data = torch.flip(self.data, dims=(-1, -2))
+		self.data = squeeze_to_dim(self.data, dim=3)
 		self.IDs = list(range(len(data)))  # list of data IDs, but also mapping between integer index and ID
 
 		self.masking_ratio = masking_ratio
 		self.mean_mask_length = mean_mask_length
-		self.mode = mode
-		self.distribution = distribution
+		self.mode = mask_mode
+		self.distribution = mask_distribution
 		self.exclude_feats = exclude_feats
 		self.mask_row = mask_row
 
@@ -527,7 +617,7 @@ class ImputationDataset(Dataset):
 			label= self.label[self.IDs[ind]]
 		else:
 			label = None
-		X = torch.tensor(X).transpose(0, 1)
+		X = torch.tensor(X)
 		mask = noise_mask(X[:,0].unsqueeze(1).numpy() if self.mask_row else X.numpy(), self.masking_ratio, self.mean_mask_length, self.mode, self.distribution,
 						  self.exclude_feats)  # (seq_length, feat_dim) boolean array
 

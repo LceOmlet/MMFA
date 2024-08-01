@@ -242,12 +242,12 @@ class TSTransformerEncoder(nn.Module):
     def forward(self, X, padding_masks):
         """
         Args:
-            X: (batch_size, seq_length, feat_dim) torch tensor of masked features (input)
+            X: (batch_size, feat_dim, seq_length) torch tensor of masked features (input)
             padding_masks: (batch_size, seq_length) boolean tensor, 1 means keep vector at this position, 0 means padding
         Returns:
             output: (batch_size, seq_length, feat_dim)
         """
-
+        X = X.permute(0, 2, 1)
         # permute because pytorch convention for transformers is [seq_length, batch_size, feat_dim]. padding_masks [batch_size, feat_dim]
         inp = X.permute(1, 0, 2)
         inp = self.project_inp(inp) * math.sqrt(
@@ -264,11 +264,19 @@ class TSTransformerEncoder(nn.Module):
         return output
     
     def get_encodding(self, X, padding_masks):
+        # inp = X.permute(1, 0, 2)
+        # inp = X
+        # print(inp.shape)
+        padding_masks = torch.ones(X.shape[0], X.shape[-1]).to(dtype=bool, device=X.device)
+        X = X.permute(0, 2, 1)
+        # permute because pytorch convention for transformers is [seq_length, batch_size, feat_dim]. padding_masks [batch_size, feat_dim]
+        
         inp = X.permute(1, 0, 2)
         inp = self.project_inp(inp) * math.sqrt(
             self.d_model)  # [seq_length, batch_size, d_model] project input vectors to d_model dimensional space
         inp = self.pos_enc(inp)  # add positional encoding
         # NOTE: logic for padding masks is reversed to comply with definition in MultiHeadAttention, TransformerEncoderLayer
+        # inp = inp.permute(0, 2, 1)
         output = self.transformer_encoder(inp, src_key_padding_mask=~padding_masks)  # (seq_length, batch_size, d_model)
         output = self.act(output)  # the output transformer encoder/decoder embeddings don't include non-linearity
         output = output.permute(1, 2, 0)  # (batch_size, seq_length, d_model)

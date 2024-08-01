@@ -422,7 +422,7 @@ class PatchTSTEncoder(nn.Module):
 
         if "tcc" in train_mode:
             z = torch.reshape(r_sample, (-1, num_patch, self.embed_patch_aggr))
-            z = z.permute(0, 2, 1) # z: [bs x num_patch x d_model]
+            z = z # z: [bs x num_patch x d_model]
         elif "spec" in train_mode:
             z = r_sample
             project = self.projector(z)

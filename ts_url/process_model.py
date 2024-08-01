@@ -1,17 +1,11 @@
-try:
-    from .models.mvts_transformer.src.models.ts_transformer import TSTransformerEncoder
-    from .models.ts2vec.ts2vec import TS2Vec
-    from .models.ts_tcc.models.model import base_Model
-    from .models.ts_tcc.models.TC import TC
-    from .models.default_configs.configues import model_configures
-    from .models.UnsupervisedScalableRepresentationLearningTimeSeries.networks.causal_cnn import CausalCNNEncoder
-except Exception:
-    from models.mvts_transformer.src.models.ts_transformer import TSTransformerEncoder
-    from models.ts2vec.ts2vec import TS2Vec
-    from models.ts_tcc.models.model import base_Model
-    from models.ts_tcc.models.TC import TC
-    from models.default_configs.configues import model_configures
-    from models.UnsupervisedScalableRepresentationLearningTimeSeries.networks.causal_cnn import CausalCNNEncoder
+
+from .models.mvts_transformer.src.models.ts_transformer import TSTransformerEncoder
+from .models.ts2vec.ts2vec import TS2Vec
+from .models.ts_tcc.models.model import base_Model
+from .models.ts_tcc.models.TC import TC
+# from .models.default_configs.configues import model_configures
+from .models.UnsupervisedScalableRepresentationLearningTimeSeries.networks.causal_cnn import CausalCNNEncoder
+
 from .models.CSL.blocks import LearningShapeletsModelMixDistances
 import json
 import logging
@@ -21,7 +15,13 @@ import numpy as np
 import os
 from .registry import MODELS
 from .utils.utils import reduce
-
+from .models.Bert.bert import SFA_Bert
+from .models.ResNet.ResNet12 import ResNet12
+from .models.ResNet1d.rescnn import ResCNN
+from .models.CSL_GNN import csl_pad 
+from .models.CSL_GNN import csl_pad_rec
+from .models.gemma.gemma import SFA_Gemma
+from .models.tinyllama.tinyllama import SFA_TinyLlama
 
 @MODELS.register("ts_tcc")
 class TS_TCC(nn.Module):
@@ -109,7 +109,7 @@ class T_LOSS(CausalCNNEncoder):
         return features
     
     def encode(self, data, reduce_method="mean", **kwargs):
-        repr = self(data.permute(0, 2, 1))
+        repr = self(data)
         repr = reduce(repr, reduce_method)
         return repr
 
@@ -147,10 +147,11 @@ class mvts_transformer(TSTransformerEncoder):
 
 @MODELS.register("csl")
 class CSL(LearningShapeletsModelMixDistances):
-    def __init__(self, max_len, feat_dim, **kwargs) -> None:
+    def __init__(self, max_len, feat_dim, output_dim=320,**kwargs) -> None:
         
         len_ts = max_len
-        shapelets_size_and_len = {int(i): 40 for i in np.linspace(min(128, max(3, int(0.1 * len_ts))), int(0.8 * len_ts), 8, dtype=int)}
+        num_shapelets = output_dim // 8
+        shapelets_size_and_len = {int(i): num_shapelets for i in np.linspace(min(128, max(3, int(0.1 * len_ts))), int(0.8 * len_ts), 8, dtype=int)}
         self.shapelets_size_and_len = shapelets_size_and_len
         super(CSL, self).__init__(shapelets_size_and_len, in_channels=feat_dim)
         # self.num_shapelets = self.csl.num_shapelets
@@ -250,6 +251,8 @@ def get_model(model_name, dls_setting, model_config, task="self-supervised", dev
         "max_len": dls_setting["seq_len"],
         "device": device
     })
+    print(model_name)
+    # print(model_config)
     model = model_class(**model_config)
     logger.info(model_config)
     logger.info(model)

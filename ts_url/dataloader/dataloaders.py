@@ -1,4 +1,4 @@
-from ..registry.registry import DATALOADERS, PRETRAIN_LOADERS, COLLATE_FN
+from ..registry.registry import DATALOADERS, PRETRAIN_LOADERS, COLLATE_FN, DATASET
 from ..process_data import *
 from torch.utils.data import DataLoader
 
@@ -9,36 +9,47 @@ def get_imputation_loaders(dls, fine_tune_config, optim_config, logger, **kwargs
     train_ds = [(dls.train_ds[i][0],) for i in range(len(dls.train_ds))]
     valid_ds = [(dls.valid_ds[i][0],) for i in range(len(dls.valid_ds))]
     train_ds = ImputationDataset(train_ds, mean_mask_length=optim_config['mean_mask_length'],
-                masking_ratio=optim_config['masking_ratio'], mode=optim_config['mask_mode'],
-                distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'], mask_row=False)
+                masking_ratio=optim_config['masking_ratio'], mask_mode=optim_config['mask_mode'],
+                mask_distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'], mask_row=False, shuffle=False)
     valid_ds = ImputationDataset(valid_ds, mean_mask_length=optim_config['mean_mask_length'],
-                masking_ratio=optim_config['masking_ratio'], mode=optim_config['mask_mode'],
-                distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'])
-    valid_dataloader = DataLoader(valid_ds, batch_size=1, collate_fn=COLLATE_FN.get("unsupervise"))
-    dataloader = DataLoader(train_ds, batch_size=optim_config["batch_size"], collate_fn=COLLATE_FN.get("unsupervise"))
+                masking_ratio=optim_config['masking_ratio'], mask_mode=optim_config['mask_mode'],
+                mask_distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'])
+    valid_dataloader = DataLoader(valid_ds, batch_size=64, collate_fn=COLLATE_FN.get("unsupervise"))
+    dataloader = DataLoader(train_ds, batch_size=optim_config["batch_size"], collate_fn=COLLATE_FN.get("unsupervise"), drop_last=True)
     logger.info("train_ds length: " + str(len(train_ds)) + ", valid_ds length: " + str(len(valid_ds)))
     return dataloader, valid_dataloader
 
 @DATALOADERS.register("pretraining")
-def get_PRETRAINLOADERSs(dls, optim_config, model_name, logger, **kwargs):
+def get_PRETRAINLOADERSs(dls, optim_config, model_name, logger, data_configs, **kwargs):
+    # print(data_configs)
+    d_name = "_".join([d['dsid'] for d in data_configs])
     data = [dls.train_ds[i][0] for i in range(len(dls.train_ds))]
     label = [dls.train_ds[i][1] for i in range(len(dls.train_ds))]
-    train_ds = ImputationDataset(data, label=label, mean_mask_length=optim_config['mean_mask_length'],
-                masking_ratio=optim_config['masking_ratio'], mode=optim_config['mask_mode'],
-                distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'], mask_row=False)
+    dataset_kwargs = {
+        "data": data,
+        "label": label,
+        "d_name": d_name,
+        "mask_row": False,
+        "optim_config": optim_config
+    }
+    DataSet = DATASET.get(model_name)
+    train_ds = DataSet(**dataset_kwargs)
+    dataset_kwargs.update(optim_config)
     data = [dls.valid_ds[i][0] for i in range(len(dls.valid_ds))]
     label = [dls.valid_ds[i][1] for i in range(len(dls.valid_ds))]
+    # print(f"valid anom num: {sum(label)}")
+    # raise RuntimeError()
     valid_ds = ImputationDataset(data, label=label, mean_mask_length=optim_config['mean_mask_length'],
-                masking_ratio=optim_config['masking_ratio'], mode=optim_config['mask_mode'],
-                distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'])
-    valid_dataloader = DataLoader(valid_ds, batch_size=1, collate_fn=COLLATE_FN.get("unsupervise"))
-
+                masking_ratio=optim_config['masking_ratio'], mask_mode=optim_config['mask_mode'],
+                mask_distribution=optim_config['mask_distribution'], exclude_feats=optim_config['exclude_feats'], shuffle=False)
+    valid_dataloader = DataLoader(valid_ds, batch_size=optim_config["batch_size"], collate_fn=COLLATE_FN.get("unsupervise"), shuffle=False)
     loader_config = {
         "train_ds": train_ds,
         "optim_config": optim_config,
         "collate_fn": COLLATE_FN.get(model_name)
     }
     dataloader = PRETRAIN_LOADERS.get(model_name)(**loader_config)
+    # print(len(dataloader.dataset), len(valid_dataloader.dataset))
     logger.info("train_ds length: " + str(len(train_ds)) + ", valid_ds length: " + str(len(valid_ds)))
     return  dataloader, valid_dataloader
 
@@ -46,9 +57,11 @@ def get_PRETRAINLOADERSs(dls, optim_config, model_name, logger, **kwargs):
 @PRETRAIN_LOADERS.register("t_loss")
 @PRETRAIN_LOADERS.register("ts2vec")
 @PRETRAIN_LOADERS.register("csl")
+@PRETRAIN_LOADERS.register("mmfa_rec")
+@PRETRAIN_LOADERS.register("mmfa")
 def get_mvts_t_loss_loader(train_ds, optim_config, collate_fn, **kwargs):
     batch_size = optim_config["batch_size"]
-    dataloader = DataLoader(train_ds, batch_size=batch_size, collate_fn=collate_fn)
+    dataloader = DataLoader(train_ds, batch_size=batch_size, collate_fn=collate_fn, drop_last=True)
     return dataloader
 
 @PRETRAIN_LOADERS.register("ts_tcc")
@@ -63,9 +76,9 @@ def get_ts_tcc(train_ds, optim_config, collate_fn, **kwargs):
 def get_classification_loaders(dls, fine_tune_config, optim_config, logger, **kwargs):
     data = [dls.train_ds[i][0] for i in range(len(dls.train_ds))]
     label = [dls.train_ds[i][1] for i in range(len(dls.train_ds))]
-    train_ds = ClassiregressionDataset(data, labels=label)
     data = [dls.valid_ds[i][0] for i in range(len(dls.valid_ds))]
     label = [dls.valid_ds[i][1] for i in range(len(dls.valid_ds))]
+    train_ds = ClassiregressionDataset(data, labels=label)
     valid_ds = ClassiregressionDataset(data, labels=label)
     dataloader = DataLoader(train_ds, batch_size=optim_config["batch_size"], collate_fn=collate_superv)
     valid_dataloader = DataLoader(valid_ds, batch_size=1, collate_fn=collate_superv)

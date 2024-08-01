@@ -3,8 +3,27 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from ...utils.utils import Projector
-from ...registry import MODELS
+
+try:
+    from ...utils.utils import Projector
+    from ...registry import MODELS
+except:
+    
+    class Registry:
+        def __init__(self, *args, **kwargs):
+            self._registry = {}
+
+        def register(self, name):
+            def decorator(func_or_class):
+                self._registry[name] = func_or_class
+                return func_or_class
+            return decorator
+
+        def get(self, name):
+            return self._registry.get(name)
+    Projector = Registry
+    MODELS = Registry()
+    
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -71,6 +90,7 @@ class BasicBlock(nn.Module):
                     1.0 - self.drop_rate / 40000 * self.num_batches_tracked,
                     1.0 - self.drop_rate
                 )
+
                 gamma = (
                     (1 - keep_rate)
                     / self.block_size**2 * feat_size**2
@@ -171,14 +191,18 @@ class ResNet12Backbone(nn.Module):
         embedding_dropout=0.0,  # dropout for embedding
         dropblock_dropout=0.1,  # dropout for residual layers
         dropblock_size=5,
+        num_filters=(32, 128, 256, 180),
+        pool_size=5
     ):
         super(ResNet12Backbone, self).__init__()
+        # print(num_filters, pool_size)
+        # raise RuntimeError()
         self.inplanes = 1
         block = BasicBlock
-        if wider:
-            num_filters = [32, 128, 256, 180]
-        else:
-            num_filters = [32, 128, 256, 16]
+        # if wider:
+        #     num_filters = [32, 128, 256, 180]
+        # else:
+        #     num_filters = [32, 128, 256, 16]
 
         self.layer1 = self._make_layer(
             block,
@@ -197,7 +221,7 @@ class ResNet12Backbone(nn.Module):
             num_filters[2],
             stride=2,
             dropblock_dropout=dropblock_dropout,
-            drop_block=True,
+            drop_block=dropblock_dropout,
             block_size=dropblock_size,
         )
         self.layer4 = self._make_layer(
@@ -205,10 +229,10 @@ class ResNet12Backbone(nn.Module):
             num_filters[3],
             stride=2,
             dropblock_dropout=dropblock_dropout,
-            drop_block=True,
+            drop_block=dropblock_dropout,
             block_size=dropblock_size,
         )
-        self.avgpool = nn.AvgPool2d(5, stride=1)
+        self.avgpool = nn.AvgPool2d(pool_size, stride=1)
         self.flatten = torch.nn.Flatten()
         self.embedding_dropout = embedding_dropout
         self.keep_avg_pool = avg_pool
@@ -302,7 +326,7 @@ class ResNet12(nn.Module):
 
     **Arguments**
 
-    * **output_size** (int) - The dimensionality of the output (eg, number of classes).
+    * **output_dim** (int) - The dimensionality of the output (eg, number of classes).
     * **hidden_size** (list, *optional*, default=640) - Size of the embedding once features are extracted.
         (640 is for mini-ImageNet; used for the classifier layer)
     * **avg_pool** (bool, *optional*, default=True) - Set to False for the 16k-dim embeddings of Lee et al, 2019.
@@ -314,35 +338,37 @@ class ResNet12(nn.Module):
 
     **Example**
     ~~~python
-    model = ResNet12(output_size=ways, hidden_size=1600, avg_pool=False)
+    model = ResNet12(output_dim=ways, hidden_size=1600, avg_pool=False)
     ~~~
     """
 
     def __init__(
         self,
-        output_size=320,
+        output_dim=320,
         hidden_size=1600,  # mini-ImageNet images, used for the classifier
         avg_pool=True,  # Set to False for 16000-dim embeddings
-        wider=False,  # True mimics MetaOptNet, False mimics TADAM
         embedding_dropout=0.0,  # dropout for embedding
         dropblock_dropout=0.1,  # dropout for residual layers
-        dropblock_size=5, **kwargs
+        dropblock_size=5,
+        num_filters = (32, 128, 256, 16),
+        pool_size=5,
+        **kwargs
     ):
         super(ResNet12, self).__init__()
         self.features = ResNet12Backbone(
             avg_pool=avg_pool,
-            wider=wider,
             embedding_dropout=embedding_dropout,
             dropblock_dropout=dropblock_dropout,
             dropblock_size=dropblock_size,
+            num_filters=num_filters,
+            pool_size=pool_size
         )
-        if wider: 
-            hidden_size = 1620
         
         # print(wider)
         # exit()
-        self.classifier = torch.nn.Linear(hidden_size, output_size)
-        self.projector = Projector("4096-8192", output_size)
+        # print(hidden_size, output_dim)
+        self.classifier = torch.nn.Linear(hidden_size, output_dim)
+        self.projector = Projector("4096-8192", output_dim)
 
     def forward(self, x, **kwargs):
         # print(x.shape)
@@ -356,8 +382,10 @@ class ResNet12(nn.Module):
 
 
 if __name__ == '__main__':
-    model = ResNet12(output_size=5, avg_pool=False, dropblock_dropout=0.0)
-    img = torch.randn(5, 12, 224, 224)
+    model = ResNet12(output_dim=5, avg_pool=False, 
+                     dropblock_dropout=0.0, num_filters=[32, 128, 256, 32],
+                     pool_size=4, hidden_size=512)
+    img = torch.randn(7, 1, 128, 128)
     model = model.to('cuda')
     img = img.to('cuda')
     out = model.features(img)

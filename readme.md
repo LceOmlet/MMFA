@@ -91,3 +91,6 @@ The hyper-parameters can be changed at anytime before a task being invoked.
 - [x] Support convenient registrations for more self-supervise signals.
 - [ ] Support [alignment](https://arxiv.org/abs/2312.05698) methods to distil knowledge from multiple encoders. 
 - [ ] Support more convenient APIs for advanced development.
+
+
+export BNB_CUDA_VERSION=122

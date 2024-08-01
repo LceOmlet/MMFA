@@ -12,6 +12,7 @@ import torch
 import xlrd
 import xlwt
 from xlutils.copy import copy
+from torch import nn
 
 import logging
 logging.basicConfig(format='%(asctime)s | %(levelname)s : %(message)s', level=logging.INFO)
@@ -394,3 +395,34 @@ def Projector(mlp, embedding):
         layers.append(nn.ReLU(True))
     layers.append(nn.Linear(f[-2], f[-1], bias=False))
     return nn.Sequential(*layers)
+
+def normalize(memmap, norm_type):
+	"""
+	Args:
+		memmap: input dataframe
+	Returns:
+		dmemmapf: normalized dataframe
+	"""
+	if norm_type == "standardization":
+		mean = memmap.mean()
+		std = memmap.std()
+		return (memmap - mean) / (std + np.finfo(float).eps)
+	
+	if norm_type == "z_normalization":
+		return (memmap - np.mean(memmap, axis=-1, keepdims=True)) / (np.finfo(float).eps + np.std(memmap, axis=-1, keepdims=True))
+
+	elif norm_type == "minmax":
+		max_val = np.max(memmap)
+		min_val = np.min(memmap)
+		return (memmap - min_val) / (max_val - min_val + np.finfo(float).eps)
+
+	elif norm_type == "per_sample_std":
+		return (memmap - np.mean(memmap, axis=0)) / np.std(memmap, axis=0)
+
+	elif norm_type == "per_sample_minmax":
+		min_vals = np.min(memmap, axis=0)
+		max_vals = np.max(memmap, axis=0)
+		return (memmap - min_vals) / (max_vals- min_vals + np.finfo(float).eps)
+
+	else:
+		raise (NameError(f'Normalize method "{norm_type}" not implemented'))

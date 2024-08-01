@@ -1,16 +1,6 @@
-## Official Implementation of "UniTS: A Universal Time Series Analysis Framework Powered by Self-supervised Representation Learning".
-UniTS is a powerful framework for time series analysis that incorporates self-supervised representation learning to address practical challenges such as partial labeling and domain shift. With UniTS, users can easily perform analysis tasks using user-friendly GUIs and benefit from its convenience. The components of UniTS are designed with sklearn-like APIs, allowing for flexible extensions. This project's GitHub repository provides access to the UniTS framework and related resources.
+## Implementation of "Multivariate Time Series, Unsupervised Representation Learning, Feature Engineering, Eigenfunctions, Classification, Clustering, Anomaly Detection".
+Unsupervised representation learning (URL) for time series data has garnered significant interest due to its remarkable adaptability across diverse downstream applications. It is tricky to ensure the utility for downstream tasks by focusing on patterns implied in the temporal domain features since the goal of URL differs from supervised learning methods. This study introduces an innovative approach that focuses on binding time series representations encoded from different modalities features, thereby guiding the neural encoder to recover local and global associations among these multi-modal features. Though, a variety of feature engineering techniques, e.g., spectral features, wavelet transformed features, features in image form and symbolic features, etc., transform time series to multi-modal informative features, the utilization of intricate feature fusion methods dealing with heterogeneous features hampers their scalability. In contrast to common methods that fuse features from multiple modalities, the proposed approach simplifies the neural architecture by retaining a single time series encoder. We further demonstrate and prove mechanisms for the encoder to maintain better inductive bias. By validating the proposed method on a diverse set of time series datasets, our approach outperforms existing state-of-the-art URL methods across diverse downstream tasks. This paper introduces a novel model-agnostic paradigm for time series URL, paving a new research direction.
 
-Our demonstration video.
-
-[![Please view our demonstration video. ](./figures/covering.png)](https://www.youtube.com/watch?v=uyvl0E29aKY)
-
-### What's new?
-An effective and comprehensive representation learning method:
-
-:boom: :boom: [A Shapelet-based Framework for Unsupervised Multivariate Time Series Representation Learning](https://www.vldb.org/pvldb/vol17/p386-wang.pdf) :boom: :boom:.
-
-The theoretical foundation of url for ts is being built by considering shaplet as adaptive wavelet.
 
 ### How to Install?
 #### Linux
@@ -18,13 +8,6 @@ The theoretical foundation of url for ts is being built by considering shaplet a
 2. Simply run `bash env.sh` and waiting for the environment to be installed.
 
 Just run `python app.py` in the created python environment "UniTS". After few seconds, you will see the GUI.
-
-#### Windows
-Almost the same as installing in linux system.
-1. Install [miniconda](https://docs.anaconda.com/anaconda/install/linux/).
-2. run env.sh as .bat file.
-Just run `python app.py` in the created python environment "UniTS". 
-
 
 
 ### Suported methods & datasets.
@@ -34,7 +17,22 @@ Just run `python app.py` in the created python environment "UniTS".
 * [Server Machine
 Dataset, SMD](https://dl.acm.org/doi/10.1145/3292500.3330672), the preprocessed datasets are uploaded in [this directory](data/InTerFusion).
 
+- Evaluate
+```bash
+python experiment.py --gpu 0 --model_name mmfa --dataset_name LSST
+```
+
+
+* [UCR Anomaly Detection](https://www.cs.ucr.edu/%7Eeamonn/time_series_data_2018/), providing datasets for various anomaly detection tasks. Preprocessed and raw data can be found in [this directory](data/AnomalyDatasets_2021).
+
+- Evaluate
+```bash
+python experiment.py --gpu 0 --model_name mmfa --dataset_name ucr
+```
+
+
 * [Application Server Dataset, ASD](https://dl.acm.org/doi/10.1145/3447548.3467075), the preprocessed datasets are uploaded in [this directory](data/InTerFusion).
+
 
 * Customed data
 The costomed datasets can be placed in any directions and be constructed as:
@@ -76,21 +74,8 @@ Here we provide an example of hyper-parameters selected for an imputation task, 
     "@mask_distribution/choice": ["geometric", "bernoulli"],
     "mean_mask_length": 3,
     "exclude_feats": null,
-    "evaluator":"ridge"
+    "evaluator":"svm"
 }
 ```
 The hyper-parameters can be changed at anytime before a task being invoked.
 
-
-### Todo List
-
-- [x] Support insightful visualization for all supported downstream tasks.
-- [x] Support customed datasets.
-- [x] Support fast and convenient installation.
-- [x] Support convenient registrations for more URL models.
-- [x] Support convenient registrations for more self-supervise signals.
-- [ ] Support [alignment](https://arxiv.org/abs/2312.05698) methods to distil knowledge from multiple encoders. 
-- [ ] Support more convenient APIs for advanced development.
-
-
-export BNB_CUDA_VERSION=122

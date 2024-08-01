@@ -64,9 +64,9 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--model_name", type=str, default="mvts_transformer")
 parser.add_argument("--gpu", type=int, default=5)
-parser.add_argument("--start_ds", type=int, default=0)
 parser.add_argument("--dataset_name", type=str, default="")
 parser.add_argument("--experiment_type", type=str, default="PT")
+# parser.add_argument("")
 args = parser.parse_args()
 
 experiment = "exp1"
@@ -123,9 +123,22 @@ device = int(args.gpu)
 if args.dataset_name != "":
     datasets = [args.dataset_name]
     
-    
-for i in range(84, 250):
-    dsid = "ad_ucr_" + str(i)
+if args.dataset_name == "ucr":
+    for i in range(0, 250):
+        dsid = "ad_ucr_" + str(i)
+        data_configs = get_config(dsid=dsid)
+        data_names = [d['dsid'] for d in data_configs]
+        task_summary = "_".join(data_names) + "_" + model_name
+        start_time = time.strftime("%m_%d_%H_%M_%S", time.localtime()) 
+        save_path = os.path.join(experiment, task_summary, start_time)
+        os.makedirs(save_path, exist_ok=True)
+        trainer = Trainer(data_configs, model_name, p_path, 
+                        device, optim_config, task_name, save_path=save_path)
+
+        # trainer.validate(epoch_num=0, key_metric="loss", save_dir=save_path)
+        trainer.fit()
+else:
+    dsid = args.dataset_name
     data_configs = get_config(dsid=dsid)
     data_names = [d['dsid'] for d in data_configs]
     task_summary = "_".join(data_names) + "_" + model_name

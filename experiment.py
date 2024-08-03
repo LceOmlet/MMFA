@@ -79,7 +79,7 @@ task_name = "pretraining"
 device = torch.device('cuda')
 
 
-def get_config(filepath="/home/liangchen/liangchen/aeon/aeon/datasets/data/test/Multivariate_ts", 
+def get_config(filepath="/home/username/username/aeon/aeon/datasets/data/test/Multivariate_ts", 
                train_ratio=1, test_ratio=1, dsid="HandMovementDirection"):
     filepath += '/' + dsid
     data_configs = [{

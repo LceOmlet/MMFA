@@ -12,11 +12,11 @@
                 "load_wwm_weights": true,
                 "rank": 8,
                 "lora_alpha": 32,
-                "tokenizer" : "/home/liangchen/vllm/TinyLlama_v1.1_re",
+                "tokenizer" : "/home/username/vllm/TinyLlama_v1.1_re",
                 "lr": 4e-5
             },
             "max_bag": 5,
-            "tokenizer" : "/home/liangchen/vllm/TinyLlama_v1.1_re"
+            "tokenizer" : "/home/username/vllm/TinyLlama_v1.1_re"
         }
     },
     "main_transformation":[

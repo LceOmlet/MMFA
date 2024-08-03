@@ -16,7 +16,7 @@ from transformers import BitsAndBytesConfig
 
 # export BNB_CUDA_VERSION=122
 # CUDA_VISIBLE_DEVICES=0,2,3,5 python experiment.py --model_name mmfa --gpu 0 --dataset_name NATOPS --experiment_type PT
-model_path = "/home/liangchen/vllm/gemma-2-9b"
+model_path = "/home/username/vllm/gemma-2-9b"
 if not os.path.exists(model_path):
     model_path = "google/gemma-2-9b"
 @MODELS.register("Gemma")

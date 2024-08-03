@@ -107,7 +107,7 @@ python src/main.py --output_dir path/to/experiments --comment "regression from S
 ### Classification
 
 ```bash
-python src/main.py --output_dir experiments --comment "classification from Scratch" --name ArticularyWordRecognition_fromScratch --records_file Classification_records.xls --data_dir /home/liangchen/Desktop/3liang/mvts_transformer/src/datasets/classify/ArticularyWordRecognition --data_class tsra --pattern TRAIN --val_pattern TEST --epochs 400 --lr 0.001 --optimizer RAdam  --pos_encoding learnable  --task classification  --key_metric accuracy
+python src/main.py --output_dir experiments --comment "classification from Scratch" --name ArticularyWordRecognition_fromScratch --records_file Classification_records.xls --data_dir /home/username/Desktop/3liang/mvts_transformer/src/datasets/classify/ArticularyWordRecognition --data_class tsra --pattern TRAIN --val_pattern TEST --epochs 400 --lr 0.001 --optimizer RAdam  --pos_encoding learnable  --task classification  --key_metric accuracy
 ```
 
 ## Pre-train models (unsupervised learning through input masking)
@@ -117,7 +117,7 @@ Can be used for any downstream task, e.g. regression, classification, imputation
 Make sure that the network architecture parameters of the pretrained model match the parameters of the desired fine-tuned model (e.g. use `--d_model 64` for `SpokenArabicDigits`).
 
 ```bash
-python src/main.py --output_dir experiments --comment "pretraining through imputation" --name ArticularyWordRecognition_pretrained --records_file Imputation_records.xls --data_dir /home/liangchen/Desktop/3liang/mvts_transformer/src/datasets/classify/ArticularyWordRecognition --data_class tsra --pattern TRAIN --val_ratio 0.2 --epochs 700 --lr 0.001 --optimizer RAdam --batch_size 32 --pos_encoding learnable --d_model 320
+python src/main.py --output_dir experiments --comment "pretraining through imputation" --name ArticularyWordRecognition_pretrained --records_file Imputation_records.xls --data_dir /home/username/Desktop/3liang/mvts_transformer/src/datasets/classify/ArticularyWordRecognition --data_class tsra --pattern TRAIN --val_ratio 0.2 --epochs 700 --lr 0.001 --optimizer RAdam --batch_size 32 --pos_encoding learnable --d_model 320
 ```
 
 As noted above, please check the paper for the optimal hyperparameter values for each dataset. E.g. for pretraining on `BeijingPM25Quality`, one should use `--batch_size 128`.

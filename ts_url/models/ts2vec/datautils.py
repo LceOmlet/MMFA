@@ -8,7 +8,7 @@ import pickle
 from _utils import pkl_load, pad_nan_to_target
 from scipy.io.arff import loadarff
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-"""/home/liangchen/miniconda3/envs/tpad/lib/python3.8/site-packages/scipy/io/arff/_arffread.py"""
+"""/home/username/miniconda3/envs/tpad/lib/python3.8/site-packages/scipy/io/arff/_arffread.py"""
 def load_UCR(dataset):
     train_file = os.path.join('datasets/UCR', dataset, dataset + "_TRAIN.tsv")
     test_file = os.path.join('datasets/UCR', dataset, dataset + "_TEST.tsv")
@@ -92,8 +92,8 @@ def load_single_arff(path):
 
 
 def load_UEA(dataset):
-    train_data = loadarff(f'/home/liangchen/Desktop/3liang/ts2vec/datasets/UEA/{dataset}/{dataset}_TRAIN.arff')[0]
-    test_data = loadarff(f'/home/liangchen/Desktop/3liang/ts2vec/datasets/UEA/{dataset}/{dataset}_TEST.arff')[0]
+    train_data = loadarff(f'/home/username/Desktop/3liang/ts2vec/datasets/UEA/{dataset}/{dataset}_TRAIN.arff')[0]
+    test_data = loadarff(f'/home/username/Desktop/3liang/ts2vec/datasets/UEA/{dataset}/{dataset}_TEST.arff')[0]
     
     def extract_data(data):
         res_data = []

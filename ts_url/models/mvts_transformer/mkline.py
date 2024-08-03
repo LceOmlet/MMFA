@@ -1,6 +1,6 @@
 import json
 
-with open("/home/liangchen/Desktop/mvts.txt", "r") as rst:
+with open("/home/username/Desktop/mvts.txt", "r") as rst:
     mvts = json.load(rst)
 
 

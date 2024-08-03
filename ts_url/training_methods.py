@@ -298,7 +298,7 @@ class Trainer:
 
 if __name__ == '__main__':
     data_configs = [{"filepath":"", "train_ratio":1, "test_ratio":1, "dsid": "lsst"}]
-    ckpt = ['/home/liangchen/Desktop/flatkit/ckpts/03_15_17_52_15_omi-6_mvts_transformer', '/home/liangchen/Desktop/flatkit/ckpts/03_15_21_16_44_omi-6_ts2vec']
+    ckpt = ['/home/username/Desktop/flatkit/ckpts/03_15_17_52_15_omi-6_mvts_transformer', '/home/username/Desktop/flatkit/ckpts/03_15_21_16_44_omi-6_ts2vec']
     # ckpt = None
     save_name = "03_12_14_26_45_lsst_ts2vec"
     model_name = None
@@ -308,7 +308,7 @@ if __name__ == '__main__':
     hp_path, p_path = "", ""
     print_interval = 10
     loss_module = get_loss_module(task_name)
-    with open("/home/liangchen/Desktop/flatkit/ts_url/models/default_configs/ts2vec_optim.json") as optim:
+    with open("/home/username/Desktop/flatkit/ts_url/models/default_configs/ts2vec_optim.json") as optim:
         optim_config = json.load(optim)
     start_time = time.strftime("%b_%d_%H_%M_%S", time.localtime()) 
     # task_summary = "/".join(["LSST"]) + "_" + model_name

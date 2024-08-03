@@ -19,7 +19,7 @@ with open("res_file_paths_final.txt", "r") as rfpf:
             path = line + suffix
             reps = np.vstack(dict(np.load(path, allow_pickle=True))["reps"])
             reps = np.mean(reps, axis=1)
-            dataset = os.path.join("/home/liangchen/Desktop/3liang/ts2vec/datasets/UEA", dataset_name)
+            dataset = os.path.join("/home/username/Desktop/3liang/ts2vec/datasets/UEA", dataset_name)
             train_data, train_labels, test_data, test_labels = load_UEA(dataset_name)
 
             label_num = np.max(test_labels) + 1

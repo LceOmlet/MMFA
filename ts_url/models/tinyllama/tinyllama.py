@@ -17,12 +17,12 @@ from transformers import BitsAndBytesConfig
 # export BNB_CUDA_VERSION=122
 
 # CUDA_VISIBLE_DEVICES=0,2,3,5 python experiment.py --model_name mmfa --gpu 0 --dataset_name NATOPS --experiment_type PT
-model_path = "/home/liangchen/vllm/TinyLlama_v1.1"
+model_path = "/home/username/vllm/TinyLlama_v1.1"
 if not os.path.exists(model_path):
     model_path = "TinyLlama/TinyLlama_v1.1"
 @MODELS.register("TinyLlama")
 class SFA_TinyLlama(Module):
-    def __init__(self, device, output_dim=320, rank=4, lora_alpha=16, tokenizer="/home/liangchen/vllm/TinyLlama_v1.1", load_wwm_weights=True, **kwargs):
+    def __init__(self, device, output_dim=320, rank=4, lora_alpha=16, tokenizer="/home/username/vllm/TinyLlama_v1.1", load_wwm_weights=True, **kwargs):
         super(SFA_TinyLlama, self).__init__()
         model_path = tokenizer
         device_string = PartialState().process_index
